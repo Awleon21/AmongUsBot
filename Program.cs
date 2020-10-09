@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -33,7 +34,7 @@ internal class Program
         try
         {
             Console.WriteLine("[info] Welcome to my bot!");
-            _cts = new CancellationTokenSource(); 
+            _cts = new CancellationTokenSource();
 
             // Load the config file(we'll create this shortly)
             Console.WriteLine("[info] Loading config file..");
@@ -49,6 +50,12 @@ internal class Program
                 Token = _config.GetValue<string>("discord:token"),
                 TokenType = TokenType.Bot
             });
+
+            _discord.GuildAvailable += Client_GuildAvailable;
+            _discord.ClientErrored += Client_ClientError;
+            _discord.GuildMemberUpdated += MemberUpdated_Handler;
+            _discord.VoiceStateUpdated += VoiceStateUpdated_Handler;
+            _discord.MessageReactionAdded += NewMemberAccept;
 
             // Create the interactivity module(I'll show you how to use this later on)
             _interactivity = _discord.UseInteractivity(new InteractivityConfiguration()
@@ -69,10 +76,12 @@ internal class Program
             // TODO: Add command loading!
             _commands.RegisterCommands<GeneralCommands>();
             _commands.RegisterCommands<AdministrativeCommands>();
+            _commands.CommandExecuted += Commands_CommandExecuted;
+            _commands.CommandErrored += Commands_CommandErrored;
 
             await RunAsync(args);
         }
-        catch(Exception ex)
+        catch (Exception ex)
         {
             // This will catch any exceptions that occur during the operation/setup of your bot.
 
@@ -82,7 +91,14 @@ internal class Program
         }
     }
 
-     async Task RunAsync(string[] args)
+    private Task Client_Ready(ReadyEventArgs e)
+    {
+        // Let's log the fat that this event occured
+        e.Client.DebugLogger.LogMessage(LogLevel.Info, "SinestroBot", "Client is ready to process events.", DateTime.Now);
+        return Task.CompletedTask;
+    }
+
+    async Task RunAsync(string[] args)
     {
         // Connect to discord's service
         Console.WriteLine("Connecting..");
@@ -92,6 +108,57 @@ internal class Program
         // Keep the bot running until the cancellation token requests we stop
         while (!_cts.IsCancellationRequested)
             await Task.Delay(TimeSpan.FromMinutes(1));
+    }
+
+    private async Task NewMemberAccept(MessageReactionAddEventArgs e)
+    {
+        DiscordRole role = e.Channel.Guild.CurrentMember.Guild.Roles.Where(r => r.Name == "crewmate").FirstOrDefault();
+
+        if (e.Channel.Id == Constants.Channels.da_rules)
+        {
+            foreach (DiscordMember member in e.Channel.Guild.Members.Where(m => m.Username == e.User.Username))
+            {
+                await member.GrantRoleAsync(role);
+            }
+            
+            e.Client.DebugLogger.LogMessage(LogLevel.Info, "sinestrobot", $"role applied to {e.User.Username}", DateTime.Now);
+        }
+        
+    }
+
+    private async Task MemberUpdated_Handler(GuildMemberUpdateEventArgs e)
+    {
+
+        bool isDead = e.RolesAfter.Any(r => r.Name == "Dead" && !e.RolesBefore.Any(b => r.Name == b.Name));
+
+        if (isDead)
+        {
+            await e.Member.SetMuteAsync(true);
+            e.Client.DebugLogger.LogMessage(LogLevel.Info, "SinestroBot", e.Member.Username, DateTime.Now);
+        }
+        else if (!e.RolesAfter.Any(r => r.Name == "Dead"))
+        {
+            await e.Member.SetMuteAsync(false);
+        }
+    }
+
+    private Task VoiceStateUpdated_Handler(VoiceStateUpdateEventArgs e)
+    {
+        bool userLeft = e.Channel == null;
+        if (userLeft)
+        {
+            var targetVoiceStates = e.Guild.Members.Where(v => v.VoiceState != null && v.VoiceState.Channel != null).Select(v => v.VoiceState);
+            var usedChannels = new HashSet<ulong>(targetVoiceStates.Select(m => m.Channel.Id));
+            var channelsToDelete = e.Guild.Channels.Where(c => c.ParentId == Constants.Channels.Games && c.Type == DSharpPlus.ChannelType.Voice && !usedChannels.Contains(c.Id)).ToList();
+
+            channelsToDelete.ForEach(async c =>
+            {
+                await c.DeleteAsync();
+            });
+        }
+        string result = "";
+        e.Client.DebugLogger.LogMessage(LogLevel.Info, "SinestroBot", e.User.Username, DateTime.Now);
+        return Task.FromResult(result);
     }
 
     /* 
@@ -128,21 +195,6 @@ internal class Program
         return Task.CompletedTask;
     }
 
-    private async Task NewMemberAccept(MessageReactionAddEventArgs e)
-    {
-        DiscordRole role = e.Channel.Guild.CurrentMember.Guild.Roles.Where(r => r.Name == "crewmate").FirstOrDefault();
-
-        if (e.Channel.Id == Constants.Channels.da_rules)
-        {
-            foreach (DiscordMember member in e.Channel.Guild.Members.Where(m => m.Username == e.User.Username))
-            {
-                await member.GrantRoleAsync(role);
-            }
-            
-            e.Client.DebugLogger.LogMessage(LogLevel.Info, "sinestrobot", $"{role} applied to {e.User.Username}", DateTime.Now);
-        }
-    }
-
     private async Task Commands_CommandErrored(CommandErrorEventArgs e)
     {
         //Log the name of the guild sent to client
@@ -161,7 +213,7 @@ internal class Program
             };
             await e.Context.RespondAsync("", embed: embed);
         }
-        else if(e.Exception is CommandNotFoundException)
+        else if (e.Exception is CommandNotFoundException)
         {
             var emoji = DiscordEmoji.FromName(e.Context.Client, ":interrobang:");
 
@@ -174,4 +226,4 @@ internal class Program
             await e.Context.RespondAsync("", embed: embed);
         }
     }
-}        
+}
