@@ -1,2 +1,2 @@
-# AmongUsBot
-Among Us Discord Bot
+# DiscordBotLearning
+For Alex and Phil to go over C#
