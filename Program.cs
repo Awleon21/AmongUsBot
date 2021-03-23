@@ -42,12 +42,13 @@ internal class Program
                 .SetBasePath(Directory.GetCurrentDirectory())
                 .AddJsonFile("config.json", optional: false, reloadOnChange: true)
                 .Build();
-
+            
             // Create the DSharpPlus client
             Console.WriteLine("[info] Creating discord client..");
             _discord = new DiscordClient(new DiscordConfiguration
             {
-                Token = _config.GetValue<string>("discord:token"),
+                //_config.GetValue<string>("discord:token")
+                Token = _config.GetValue<string>("discord"),
                 TokenType = TokenType.Bot
             });
 
